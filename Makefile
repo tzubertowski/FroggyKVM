@@ -409,6 +409,9 @@ OBJS = \
 
 $(FLUIDLITE_OBJS): $(FLUIDLITE_STAMP)
 
+$(FLUIDLITE_DIR)/src/%.o: $(FLUIDLITE_DIR)/src/%.c $(FLUIDLITE_STAMP)
+	$(CC) $(CFLAGS) -c $< -o $@
+
 $(TARGET): $(OBJS) $(FLUIDLITE_OBJS)
 ifeq ($(STATIC_LINKING), 1)
 	$(AR) rcs $@ $(OBJS)
