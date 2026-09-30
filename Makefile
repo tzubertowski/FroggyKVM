@@ -408,9 +408,7 @@ OBJS = \
 	pspkvm/cldc/src/vm/share/float/Tangent_kernel.o
 
 $(FLUIDLITE_OBJS): $(FLUIDLITE_STAMP)
-
-$(FLUIDLITE_DIR)/src/%.o: $(FLUIDLITE_DIR)/src/%.c $(FLUIDLITE_STAMP)
-	$(CC) $(CFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) -c $(@:.o=.c) -o $@
 
 $(TARGET): $(OBJS) $(FLUIDLITE_OBJS)
 ifeq ($(STATIC_LINKING), 1)
@@ -431,7 +429,6 @@ override CXXFLAGS += $(MORE_CFLAGS)
 %.o: %.cpp
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
-$(FLUIDLITE_OBJS): $(FLUIDLITE_STAMP)
 $(OBJS): $(FLUIDLITE_STAMP)
 
 .PHONY: all clean
