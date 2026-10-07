@@ -10,6 +10,7 @@ FLUIDLITE_SHA256 = 83543805fddb8d5e9bc339b2be1accb38d316bd66b51722444cecc5bb894a
 FLUIDLITE_DIR = build/fluidlite-$(FLUIDLITE_REV)
 FLUIDLITE_ARCHIVE = build/fluidlite-$(FLUIDLITE_REV).tar.gz
 FLUIDLITE_STAMP = $(FLUIDLITE_DIR)/.ready
+J2ME_MAX_HEAP_BYTES ?= 8388608
 FLUIDLITE_OBJS = \
 	$(FLUIDLITE_DIR)/src/fluid_chan.o \
 	$(FLUIDLITE_DIR)/src/fluid_chorus.o \
@@ -51,7 +52,7 @@ ifeq ($(platform), sf2000)
     STATIC_LINKING = 1
 else ifeq ($(platform), sf3000)
     TARGET := $(NAME)_libretro.so
-    MIPS_FLAGS = -EL -mips32r2 -march=mips32r2 -mtune=74kc -mdspr2 -mfp32 -mhard-float -mlong-calls -fPIC -ffunction-sections -fdata-sections -DSF3000 -DFROGGY_SD_ROOT=\"/mnt/sdcard\"
+    MIPS_FLAGS = -EL -mips32r2 -march=mips32r2 -mtune=74kc -mdspr2 -mfp32 -mhard-float -mlong-calls -fPIC -ffunction-sections -fdata-sections -DSF3000 -DFROGGY_SD_ROOT=\"/mnt/sdcard\" -DJ2ME_MAX_HEAP_BYTES=$(J2ME_MAX_HEAP_BYTES)
     override CFLAGS += $(MIPS_FLAGS)
     override CXXFLAGS += $(MIPS_FLAGS) -fno-use-cxa-atexit -fno-exceptions -fno-rtti
 else
