@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <malloc.h>
+#include <sys/stat.h>
 #include "libretro.h"
 #include "psp_compat.h"
 #include "midlet_meta.h"
@@ -42,6 +44,55 @@ __attribute__((weak)) void xlog(const char *fmt, ...) {
     vprintf(fmt, ap);
     va_end(ap);
     fflush(stdout);
+}
+
+static long proc_value_kb(const char *path, const char *key) {
+    FILE *fp = fopen(path, "r");
+    char line[128];
+    char name[64];
+    long value = -1;
+    if (!fp) return -1;
+    while (fgets(line, sizeof(line), fp)) {
+        if (sscanf(line, "%63[^:]: %ld kB", name, &value) == 2 && strcmp(name, key) == 0)
+            break;
+        value = -1;
+    }
+    fclose(fp);
+    return value;
+}
+
+static void memory_profile_write(const char *phase, int java_total, int java_used, int java_free) {
+    struct mallinfo heap = mallinfo();
+    FILE *fp = fopen("/tmp/j2me_memory.log", "a");
+    if (!fp) return;
+    fprintf(fp,
+            "phase=%s rss_kb=%ld data_kb=%ld vm_kb=%ld sys_available_kb=%ld sys_free_kb=%ld "
+            "native_used=%d native_free=%d native_peak=%d java_total=%d java_used=%d java_free=%d\n",
+            phase,
+            proc_value_kb("/proc/self/status", "VmRSS"),
+            proc_value_kb("/proc/self/status", "VmData"),
+            proc_value_kb("/proc/self/status", "VmSize"),
+            proc_value_kb("/proc/meminfo", "MemAvailable"),
+            proc_value_kb("/proc/meminfo", "MemFree"),
+            heap.uordblks, heap.fordblks, heap.usmblks,
+            java_total, java_used, java_free);
+    fclose(fp);
+}
+
+void gb300_memory_profile(const char *phase) {
+    memory_profile_write(phase, -1, -1, -1);
+}
+
+void gb300_memory_profile_java(const char *phase, int total, int used, int free) {
+    memory_profile_write(phase, total, used, free);
+}
+
+static void memory_profile_reset(void) {
+    FILE *fp = fopen("/tmp/j2me_memory.log", "w");
+    if (fp) {
+        fputs("# values are bytes unless suffixed _kb; -1 means unavailable\n", fp);
+        fclose(fp);
+    }
 }
 
 /* Libretro callback function pointers */
@@ -184,12 +235,15 @@ RETRO_API void retro_set_input_state(retro_input_state_t cb) { input_state_cb = 
 RETRO_API void retro_set_controller_port_device(unsigned port, unsigned device) { (void)port; (void)device; }
 
 RETRO_API void retro_init(void) {
+    memory_profile_reset();
+    gb300_memory_profile("retro_init_begin");
     xlog("[PSPKVM-GB300] retro_init: Initializing PSPKVM core...\n");
     gb300_video_init();
     gb300_audio_init();
     gb300_input_init();
     gb300_fs_init();
     jvm_started = false;
+    gb300_memory_profile("retro_init_done");
     xlog("[PSPKVM-GB300] retro_init: Initialization complete.\n");
 }
 
@@ -221,6 +275,7 @@ RETRO_API void retro_get_system_av_info(struct retro_system_av_info *info) {
 }
 
 RETRO_API bool retro_load_game(const struct retro_game_info *game) {
+    gb300_memory_profile("load_game_begin");
     if (!j2me_classes_available()) {
         xlog("[PSPKVM-GB300] Missing classes.zip; install it in /cubegm/bios/classes.zip\n");
         return false;
@@ -236,6 +291,7 @@ RETRO_API bool retro_load_game(const struct retro_game_info *game) {
     }
     game_loaded = true;
     jvm_started = false;
+    gb300_memory_profile("load_game_done");
     return true;
 }
 
@@ -261,6 +317,13 @@ void gb300_poll_events(void) {
 
     extern uint64_t gb300_timer_get_us(void);
     uint64_t now = gb300_timer_get_us();
+
+    static uint64_t last_memory_profile = 0;
+    if (last_memory_profile == 0 || now - last_memory_profile >= 5000000) {
+        extern void gb300_profile_java_heap(const char *phase);
+        last_memory_profile = now;
+        gb300_profile_java_heap("periodic");
+    }
 
     /* 1. Poll input, throttled to 60fps (16.6ms) */
     static uint64_t last_input_time = 0;
@@ -389,6 +452,7 @@ RETRO_API void retro_run(void) {
         gb300_hacker_log("KVM", "STARTING JAVATASK THREAD", 50);
 
         xlog("[PSPKVM-GB300] Entering JavaTask()...\n");
+        gb300_memory_profile("javatask_enter");
         s_can_exit_jmp = 1;
         if (setjmp(s_exit_jmp) == 0) {
             JavaTask();

@@ -4,6 +4,16 @@
 #include "incls/_precompiled.incl"
 #include "incls/_Throw.cpp.incl"
 
+extern "C" void gb300_memory_profile_java(const char *phase, int total, int used, int free);
+
+extern "C" void gb300_profile_java_heap(const char *phase) {
+  const int total = (int)ObjectHeap::total_memory();
+  gb300_memory_profile_java(phase,
+                            total,
+                            total > 0 ? (int)ObjectHeap::used_memory() : -1,
+                            total > 0 ? (int)ObjectHeap::free_memory() : -1);
+}
+
 ReturnOop
 Throw::new_exception(Symbol* class_name, String* message JVM_TRAPS) {
   UsingFastOops fast_oops;
@@ -203,6 +213,7 @@ void Throw::out_of_memory_error(JVM_SINGLE_ARG_TRAPS) {
   }
 #endif
 
+  gb300_profile_java_heap("java_oom");
   Thread::set_current_pending_exception(
       Universe::out_of_memory_error_instance());
   printf("[FATAL] OutOfMemoryError thrown!\n");

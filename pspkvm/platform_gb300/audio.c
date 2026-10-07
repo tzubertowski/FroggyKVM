@@ -7,6 +7,8 @@
 #include <kni.h>
 #include "fluidlite.h"
 
+void gb300_memory_profile(const char *phase);
+
 #define AUDIO_SAMPLE_RATE 22050
 #define AUDIO_BUFFER_SIZE 4096
 #define AUDIO_RING_MASK ((AUDIO_BUFFER_SIZE * 2) - 1)
@@ -71,14 +73,19 @@ static void midi_fluid_init(void) {
     int i;
     if (g_midi_synth) return;
     audio_trace("init begin");
+    gb300_memory_profile("midi_init_begin");
     g_midi_settings = new_fluid_settings();
     if (!g_midi_settings) { audio_trace("settings failed"); return; }
     fluid_settings_setnum(g_midi_settings, "synth.sample-rate", AUDIO_SAMPLE_RATE);
     fluid_settings_setint(g_midi_settings, "synth.polyphony", 32);
     g_midi_synth = new_fluid_synth(g_midi_settings);
     if (!g_midi_synth) { audio_trace("synth failed"); return; }
+    gb300_memory_profile("midi_synth_created");
     fluid_synth_set_gain(g_midi_synth, 0.65f);
     for (i = 0; sf2_paths[i]; i++) {
+        FILE *probe = fopen(sf2_paths[i], "rb");
+        if (!probe) continue;
+        fclose(probe);
         if (fluid_synth_sfload(g_midi_synth, sf2_paths[i], 1) >= 0) {
             sf2 = sf2_paths[i];
             break;
@@ -94,6 +101,7 @@ static void midi_fluid_init(void) {
         return;
     }
     audio_trace("soundfont loaded: %s", sf2);
+    gb300_memory_profile("midi_soundfont_loaded");
     xlog("[AUDIO] FluidLite SoundFont loaded: %s\n", sf2);
 }
 

@@ -58,6 +58,7 @@ static javacall_result midpHandleRemoveMIDlet(midp_event_remove_midlet removeMid
  * An entry point of a thread devoted to run java
  */
 extern void xlog(const char *fmt, ...);
+extern void gb300_memory_profile(const char *phase);
 
 void JavaTask(void) {
     static unsigned long binaryBuffer[BINARY_BUFFER_MAX_LEN/sizeof(long)];
@@ -69,17 +70,20 @@ void JavaTask(void) {
     int outEventLen;
     int heapsize;
 
+    gb300_memory_profile("javatask_body");
     xlog("[JavaTask] Entry -> starting JavaTask()...\n");
 
     if (JAVACALL_OK != javacall_initialize_configurations()) {
         xlog("[JavaTask] javacall_initialize_configurations failed\n");
     }
+    gb300_memory_profile("javatask_configured");
     
     xlog("[JavaTask] Initializing MIDP memory...\n");
     if (midpInitializeMemory(4 * 1024 * 1024) != 0) {
         xlog("[JavaTask] ERROR: midpInitializeMemory failed (Not enough memory)\n");
         return;
     }
+    gb300_memory_profile("javatask_midp_memory_ready");
     xlog("[JavaTask] MIDP memory initialized successfully.\n");
     {
         extern void gb300_hacker_log(const char *tag, const char *msg, int pct);
@@ -89,6 +93,7 @@ void JavaTask(void) {
     //javacall_global_init();
     javacall_events_init();
     javacall_keymap_init();
+    gb300_memory_profile("javatask_events_ready");
 
     /* Set Java heap size according to system heap size */
     extern int g_custom_heap_size;
@@ -122,6 +127,7 @@ void JavaTask(void) {
         }
 
         event = (midp_jc_event_union *) binaryBuffer;
+        gb300_memory_profile("javatask_event_received");
         xlog("[JavaTask] Event received! eventType=%d\n", event->eventType);
 
         switch (event->eventType) {
@@ -131,8 +137,10 @@ void JavaTask(void) {
             javacall_lifecycle_state_changed(JAVACALL_LIFECYCLE_MIDLET_STARTED,
                                              JAVACALL_OK);
             xlog("[JavaTask] Calling JavaTaskImpl...\n");
+            gb300_memory_profile("java_vm_begin");
             JavaTaskImpl(event->data.startMidletArbitraryArgEvent.argc,
                          event->data.startMidletArbitraryArgEvent.argv);
+            gb300_memory_profile("java_vm_returned");
 
             xlog("[JavaTask] JavaTaskImpl finished.\n");
             JavaTaskIsGoOn = JAVACALL_FALSE;

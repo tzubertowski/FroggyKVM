@@ -301,9 +301,17 @@ void gb300_video_draw_splash(const char *title, const char *rom_name, const char
     }
 }
 
-/* Flushes RGB565 source buffer into GB300 framebuffer, centering if dimensions differ */
+/* Fits an RGB565 source buffer to 320x240 without cropping or changing aspect ratio. */
 void gb300_video_flush(const uint16_t *src, int src_w, int src_h, int src_pitch) {
-    if (!src || gb300_video_should_skip()) return;
+    static unsigned profile_frames;
+    if (!src || src_w <= 0 || src_h <= 0 || src_pitch < src_w * (int)sizeof(uint16_t) ||
+        gb300_video_should_skip()) return;
+
+    if (++profile_frames == 150) {
+        extern void gb300_profile_java_heap(const char *phase);
+        gb300_profile_java_heap("gameplay");
+        profile_frames = 0;
+    }
 
     /* Hand off screen to game on first frame */
     s_boot_active = 0;
@@ -319,14 +327,19 @@ void gb300_video_flush(const uint16_t *src, int src_w, int src_h, int src_pitch)
         last_w = src_w;
         last_h = src_h;
     } else {
-        int dst_x = (GB300_SCREEN_WIDTH - src_w) / 2;
-        int dst_y = (GB300_SCREEN_HEIGHT - src_h) / 2;
+        int dst_w, dst_h;
+        if ((int64_t)src_w * GB300_SCREEN_HEIGHT > (int64_t)src_h * GB300_SCREEN_WIDTH) {
+            dst_w = GB300_SCREEN_WIDTH;
+            dst_h = src_h * GB300_SCREEN_WIDTH / src_w;
+        } else {
+            dst_h = GB300_SCREEN_HEIGHT;
+            dst_w = src_w * GB300_SCREEN_HEIGHT / src_h;
+        }
+        if (dst_w < 1) dst_w = 1;
+        if (dst_h < 1) dst_h = 1;
 
-        if (dst_x < 0) dst_x = 0;
-        if (dst_y < 0) dst_y = 0;
-
-        int copy_w = (src_w > GB300_SCREEN_WIDTH) ? GB300_SCREEN_WIDTH : src_w;
-        int copy_h = (src_h > GB300_SCREEN_HEIGHT) ? GB300_SCREEN_HEIGHT : src_h;
+        int dst_x = (GB300_SCREEN_WIDTH - dst_w) / 2;
+        int dst_y = (GB300_SCREEN_HEIGHT - dst_h) / 2;
 
         /* Only clear framebuffer if viewport dimensions changed to save memory bus bandwidth */
         if (last_w != src_w || last_h != src_h) {
@@ -335,10 +348,17 @@ void gb300_video_flush(const uint16_t *src, int src_w, int src_h, int src_pitch)
             last_h = src_h;
         }
 
-        for (int y = 0; y < copy_h; y++) {
+        const uint32_t x_step = ((uint32_t)src_w << 16) / (uint32_t)dst_w;
+        const uint32_t y_step = ((uint32_t)src_h << 16) / (uint32_t)dst_h;
+        uint32_t src_y = 0;
+        for (int y = 0; y < dst_h; y++, src_y += y_step) {
             uint16_t *dst_line = &gb300_framebuffer[(dst_y + y) * GB300_SCREEN_WIDTH + dst_x];
-            const uint16_t *src_line = (const uint16_t *)((const uint8_t *)src + y * src_pitch);
-            memcpy(dst_line, src_line, copy_w * sizeof(uint16_t));
+            const uint16_t *src_line = (const uint16_t *)((const uint8_t *)src +
+                                       (src_y >> 16) * src_pitch);
+            uint32_t src_x = 0;
+            for (int x = 0; x < dst_w; x++, src_x += x_step) {
+                dst_line[x] = src_line[src_x >> 16];
+            }
         }
         out_frame = gb300_framebuffer;
     }

@@ -207,8 +207,11 @@ void setInternalProperty(const char* k, const char* v) { (void)k; (void)v; }
 void setSystemProperty(const char* k, const char* v) { (void)k; (void)v; }
 #include <malloc.h>
 void* pcsl_mem_allocate_chunk(unsigned int initial_size, unsigned int max_size, unsigned int alignment) {
+    extern void gb300_memory_profile(const char *phase);
     if (alignment == 0) alignment = 4;
+    gb300_memory_profile("vm_chunk_begin");
     void *ptr = memalign(alignment, max_size);
+    gb300_memory_profile(ptr ? "vm_chunk_allocated" : "vm_chunk_failed");
     xlog("[PSPKVM] pcsl_mem_allocate_chunk(init=%u, max=%u, align=%u) -> %p\n",
          initial_size, max_size, alignment, ptr);
     return ptr;

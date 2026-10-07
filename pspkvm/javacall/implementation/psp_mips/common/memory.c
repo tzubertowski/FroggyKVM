@@ -36,6 +36,7 @@ extern "C" {
 
 static int max_heap_size = 0;
 void javacall_printf(const char *format, ...);
+void gb300_memory_profile(const char *phase);
 
 #ifndef J2ME_MAX_HEAP_BYTES
 #define J2ME_MAX_HEAP_BYTES (16 * 1024 * 1024)
@@ -57,7 +58,8 @@ void* javacall_memory_heap_allocate(int size, /*OUT*/ int* outSize) {
 	char* resv=NULL;
 	char* pSize=NULL;
 
-	if ((JAVACALL_OK == javacall_get_property("com.pspkvm.setting.reservedCHeapSize", 
+	gb300_memory_profile("vm_pool_begin");
+	if ((JAVACALL_OK == javacall_get_property("com.pspkvm.setting.reservedCHeapSize",
 		JAVACALL_INTERNAL_PROPERTY, &pSize)) &&
 		(pSize != NULL)) {
 		int configSize = atoi(pSize) * 1024;
@@ -76,12 +78,14 @@ void* javacall_memory_heap_allocate(int size, /*OUT*/ int* outSize) {
 			javacall_printf("MAX HEAP:%d\n",sz);
 			*outSize = sz;
 			max_heap_size = sz;
+			gb300_memory_profile("vm_pool_allocated");
 			free(resv);
 			return tmpp;
 		}
 		sz -= 200*1024;
 	}
 
+       gb300_memory_profile("vm_pool_failed");
        free(resv);
        return NULL;
 }
@@ -133,7 +137,7 @@ void  /*OPTIONAL*/ javacall_free(void* ptr) {
 
 int javacall_total_heap_size() {
     if (max_heap_size <= 0) {
-        return 52 * 1024 * 1024;
+        return J2ME_MAX_HEAP_BYTES;
     }
     return max_heap_size;
 }

@@ -13,8 +13,8 @@ extern void xlog(const char *fmt, ...);
 extern void javacall_lcd_set_resolution(int w, int h);
 
 static uint32_t last_buttons = 0;
-static int s_screen_width = 320;
-static int s_screen_height = 240;
+static int s_screen_width = 240;
+static int s_screen_height = 320;
 
 typedef struct {
     const char *name;
@@ -287,15 +287,16 @@ void gb300_input_load_config(const char *jar_path) {
     /* First reset to defaults */
     gb300_input_init();
 
-    s_screen_width = 320;
-    s_screen_height = 240;
+    /* Most metadata-less MIDP phone builds target a portrait QVGA display. */
+    s_screen_width = 240;
+    s_screen_height = 320;
 
     if (!jar_path || !*jar_path) {
         javacall_lcd_set_resolution(s_screen_width, s_screen_height);
         return;
     }
 
-    int dw = 320, dh = 240;
+    int dw = s_screen_width, dh = s_screen_height;
     if (gb300_detect_screen_size(jar_path, &dw, &dh)) {
         s_screen_width = dw;
         s_screen_height = dh;

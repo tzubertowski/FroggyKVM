@@ -52,7 +52,7 @@ ifeq ($(platform), sf2000)
     STATIC_LINKING = 1
 else ifeq ($(platform), sf3000)
     TARGET := $(NAME)_libretro.so
-    MIPS_FLAGS = -EL -mips32r2 -march=mips32r2 -mtune=74kc -mdspr2 -mfp32 -mhard-float -mlong-calls -fPIC -ffunction-sections -fdata-sections -DSF3000 -DFROGGY_SD_ROOT=\"/mnt/sdcard\" -DJ2ME_MAX_HEAP_BYTES=$(J2ME_MAX_HEAP_BYTES)
+    MIPS_FLAGS = -EL -march=mips32 -mtune=mips32r2 -mfp32 -mhard-float -mlong-calls -fPIC -ffunction-sections -fdata-sections -DSF3000 -DFROGGY_SD_ROOT=\"/mnt/sdcard\" -DJ2ME_MAX_HEAP_BYTES=$(J2ME_MAX_HEAP_BYTES)
     override CFLAGS += $(MIPS_FLAGS)
     override CXXFLAGS += $(MIPS_FLAGS) -fno-use-cxa-atexit -fno-exceptions -fno-rtti
 else

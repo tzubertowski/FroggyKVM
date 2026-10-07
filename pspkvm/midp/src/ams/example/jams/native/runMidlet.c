@@ -38,6 +38,8 @@
 #include <commandLineUtil_md.h>
 #include <midp_properties_port.h>
 
+extern void gb300_memory_profile(const char *phase);
+
 #if ENABLE_MULTIPLE_ISOLATES
 #define MIDP_HEAP_REQUIREMENT (MAX_ISOLATES * 1024 * 1024)
 #else
@@ -118,7 +120,9 @@ runMidlet(int argc, char** commandlineArgs) {
     char* chSuiteNum = NULL;
     int midp_heap_requirement;
 
+    gb300_memory_profile("runmidlet_enter");
     JVM_Initialize(); /* It's OK to call this more than once */
+    gb300_memory_profile("jvm_initialized");
 
 
     //midp_heap_requirement = getHeapRequirement();
@@ -146,6 +150,7 @@ runMidlet(int argc, char** commandlineArgs) {
         argc -= used;
         commandlineArgs += used;
     }
+    gb300_memory_profile("jvm_args_parsed");
 
     /* Restore commandlineArgs[0] to contain the program name. */
     argc ++;
@@ -209,11 +214,13 @@ runMidlet(int argc, char** commandlineArgs) {
     /* set up midpHome before calling initialize */
     midpSetHomeDir(midpHome);
 
+    gb300_memory_profile("midp_initialize_begin");
     if (midpInitialize() != 0) {
         REPORT_ERROR(LC_AMS, "Not enough memory");
         fprintf(stderr, "Not enough memory\n");
         return -1;
     }
+    gb300_memory_profile("midp_initialize_done");
 
     do {
         int onlyDigits;
@@ -346,6 +353,7 @@ runMidlet(int argc, char** commandlineArgs) {
         }
 
         do {
+            gb300_memory_profile("midp_run_begin");
             status = midp_run_midlet_with_args_cp(suiteId, &classname,
                                                   &arg0, &arg1, &arg2,
                                                   debugOption, additionalPath);
