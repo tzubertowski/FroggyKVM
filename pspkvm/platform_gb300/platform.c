@@ -21,6 +21,7 @@ int gb300_audio_read(int16_t *dst, int num_frames);
 
 void gb300_input_init(void);
 void gb300_input_load_config(const char *jar_path);
+void gb300_input_set_resolution(int width, int height);
 void gb300_input_poll(uint32_t current_buttons);
 
 void gb300_fs_init(void);
@@ -116,6 +117,22 @@ static void request_libretro_shutdown(void) {
 
 static bool game_loaded = false;
 static bool jvm_started = false;
+static char screen_option[16] = "Auto";
+
+static const char *get_screen_option(void) {
+    struct retro_variable var = { "froggykvm_screen_size", NULL };
+    if (environ_cb && environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
+        return var.value;
+    return "Auto";
+}
+
+static void apply_screen_option(void) {
+    const char *value = get_screen_option();
+    int width, height;
+    snprintf(screen_option, sizeof(screen_option), "%s", value);
+    if (sscanf(value, "%dx%d", &width, &height) == 2)
+        gb300_input_set_resolution(width, height);
+}
 
 static bool j2me_classes_available(void) {
     static const char *paths[] = {
@@ -208,6 +225,12 @@ RETRO_API void retro_set_environment(retro_environment_t cb) {
         enum retro_pixel_format fmt = RETRO_PIXEL_FORMAT_RGB565;
         environ_cb(RETRO_ENVIRONMENT_SET_PIXEL_FORMAT, &fmt);
 
+        static const struct retro_variable vars[] = {
+            { "froggykvm_screen_size", "J2ME Display; Auto|128x128|176x208|240x320|320x240" },
+            { NULL, NULL }
+        };
+        environ_cb(RETRO_ENVIRONMENT_SET_VARIABLES, (void *)vars);
+
         struct retro_input_descriptor desc[] = {
             { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_LEFT,   "D-Pad Left" },
             { 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_UP,     "D-Pad Up" },
@@ -284,10 +307,12 @@ RETRO_API bool retro_load_game(const struct retro_game_info *game) {
         xlog("[PSPKVM-GB300] retro_load_game: Loading ROM file '%s'\n", game->path);
         gb300_fs_set_rom(game->path);
         gb300_input_load_config(game->path);
+        apply_screen_option();
     } else {
         xlog("[PSPKVM-GB300] retro_load_game: Running in standalone/stub mode\n");
         gb300_fs_set_rom(FROGGY_SD_ROOT "/roms/j2me/stub.jar");
         gb300_input_load_config(FROGGY_SD_ROOT "/roms/j2me/stub.jar");
+        apply_screen_option();
     }
     game_loaded = true;
     jvm_started = false;
@@ -317,6 +342,22 @@ void gb300_poll_events(void) {
 
     extern uint64_t gb300_timer_get_us(void);
     uint64_t now = gb300_timer_get_us();
+
+    if (environ_cb) {
+        bool updated = false;
+        if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE_UPDATE, &updated) && updated) {
+            const char *value = get_screen_option();
+            if (strcmp(value, screen_option) != 0) {
+                xlog("[PSPKVM-GB300] J2ME Display changed from %s to %s; restarting content.\n",
+                     screen_option, value);
+                snprintf(screen_option, sizeof(screen_option), "%s", value);
+                s_exit_requested = 1;
+                if (s_can_exit_jmp) longjmp(s_exit_jmp, 1);
+                request_libretro_shutdown();
+                return;
+            }
+        }
+    }
 
     static uint64_t last_memory_profile = 0;
     if (last_memory_profile == 0 || now - last_memory_profile >= 5000000) {

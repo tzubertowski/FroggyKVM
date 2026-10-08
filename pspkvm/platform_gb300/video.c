@@ -301,7 +301,7 @@ void gb300_video_draw_splash(const char *title, const char *rom_name, const char
     }
 }
 
-/* Fits an RGB565 source buffer to 320x240 without cropping or changing aspect ratio. */
+/* Fits an RGB565 phone canvas to 320x240 without cropping or changing aspect ratio. */
 void gb300_video_flush(const uint16_t *src, int src_w, int src_h, int src_pitch) {
     static unsigned profile_frames;
     if (!src || src_w <= 0 || src_h <= 0 || src_pitch < src_w * (int)sizeof(uint16_t) ||
@@ -356,9 +356,8 @@ void gb300_video_flush(const uint16_t *src, int src_w, int src_h, int src_pitch)
             const uint16_t *src_line = (const uint16_t *)((const uint8_t *)src +
                                        (src_y >> 16) * src_pitch);
             uint32_t src_x = 0;
-            for (int x = 0; x < dst_w; x++, src_x += x_step) {
+            for (int x = 0; x < dst_w; x++, src_x += x_step)
                 dst_line[x] = src_line[src_x >> 16];
-            }
         }
         out_frame = gb300_framebuffer;
     }

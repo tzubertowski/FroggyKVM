@@ -13,8 +13,8 @@ extern void xlog(const char *fmt, ...);
 extern void javacall_lcd_set_resolution(int w, int h);
 
 static uint32_t last_buttons = 0;
-static int s_screen_width = 240;
-static int s_screen_height = 320;
+static int s_screen_width = 320;
+static int s_screen_height = 240;
 
 typedef struct {
     const char *name;
@@ -287,16 +287,15 @@ void gb300_input_load_config(const char *jar_path) {
     /* First reset to defaults */
     gb300_input_init();
 
-    /* Most metadata-less MIDP phone builds target a portrait QVGA display. */
-    s_screen_width = 240;
-    s_screen_height = 320;
+    s_screen_width = 320;
+    s_screen_height = 240;
 
     if (!jar_path || !*jar_path) {
         javacall_lcd_set_resolution(s_screen_width, s_screen_height);
         return;
     }
 
-    int dw = s_screen_width, dh = s_screen_height;
+    int dw = 320, dh = 240;
     if (gb300_detect_screen_size(jar_path, &dw, &dh)) {
         s_screen_width = dw;
         s_screen_height = dh;
@@ -388,6 +387,14 @@ void gb300_input_load_config(const char *jar_path) {
 
     javacall_lcd_set_resolution(s_screen_width, s_screen_height);
     xlog("[PSPKVM] Screen resolution set to %dx%d\n", s_screen_width, s_screen_height);
+}
+
+void gb300_input_set_resolution(int width, int height) {
+    if (width <= 0 || height <= 0 || width > 512 || height > 512) return;
+    s_screen_width = width;
+    s_screen_height = height;
+    javacall_lcd_set_resolution(width, height);
+    xlog("[PSPKVM] Core option selected screen resolution: %dx%d\n", width, height);
 }
 
 void gb300_input_poll(uint32_t current_buttons) {
