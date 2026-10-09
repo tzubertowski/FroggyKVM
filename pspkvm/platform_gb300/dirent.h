@@ -6,6 +6,8 @@ extern "C"
 {
 #endif
 
+#include <sys/types.h>
+
 #define DTYPE_UNKNOWN             0
 #define DTYPE_DIRECTORY           4
 #define DTYPE_FILE                8
@@ -21,8 +23,11 @@ extern "C"
 
 struct dirent
 {
+	  ino_t    d_ino;
+	  off_t    d_off;
+	  unsigned short d_reclen;
 	  unsigned char  d_type;
-	  char     d_name[255];
+	  char     d_name[256];
 };
 
 typedef void DIR;

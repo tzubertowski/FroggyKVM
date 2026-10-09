@@ -16,6 +16,8 @@ typedef jint SuiteIdType;
 
 #define MAX_RMS_HANDLES 64
 static int g_rms_fds[MAX_RMS_HANDLES] = { [0 ... MAX_RMS_HANDLES - 1] = -1 };
+static char g_rms_dir[512];
+#define rms_trace(...) ((void)0)
 
 static void ensure_dir_exists(const char* dir) {
     char tmp[512];
@@ -32,28 +34,53 @@ static void ensure_dir_exists(const char* dir) {
     mkdir(tmp, 0755);
 }
 
+void gb300_rms_configure(const char* save_dir, const char* game_path) {
+    const char* name = game_path ? strrchr(game_path, '/') : NULL;
+    const char* extension;
+    char game[192] = "default";
+
+    name = name ? name + 1 : game_path;
+    if (name && *name) {
+        extension = strrchr(name, '.');
+        size_t i = 0;
+        while (name[i] && name + i != extension && i + 1 < sizeof(game)) {
+            unsigned char c = (unsigned char)name[i];
+            game[i] = ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                       (c >= '0' && c <= '9') || c == '-' || c == '_') ? c : '_';
+            i++;
+        }
+        game[i] = '\0';
+        if (!game[0]) snprintf(game, sizeof(game), "default");
+    }
+
+    snprintf(g_rms_dir, sizeof(g_rms_dir), "%s%s%s",
+             save_dir && *save_dir ? save_dir : FROGGY_SD_ROOT "/saves/j2me",
+             save_dir && *save_dir && save_dir[strlen(save_dir) - 1] == '/' ? "" : "/",
+             game);
+    ensure_dir_exists(g_rms_dir);
+}
+
 static const char* get_rms_dir(void) {
-    static char s_rms_dir[512] = {0};
-    if (s_rms_dir[0] == '\0') {
+    if (g_rms_dir[0] == '\0') {
         const char* custom = getenv("GB300_RMS_DIR");
         if (custom && custom[0]) {
-            snprintf(s_rms_dir, sizeof(s_rms_dir), "%s", custom);
+            snprintf(g_rms_dir, sizeof(g_rms_dir), "%s", custom);
         } else {
-            struct stat st;
-            /* Persist RMS on the SD card when running on the GB300 target. */
-            if (stat("/mnt/sda1", &st) == 0 && S_ISDIR(st.st_mode)) {
-                snprintf(s_rms_dir, sizeof(s_rms_dir), "/mnt/sda1/system/saves");
-            } else if (stat("/home/Sajnaps/gb300/rms", &st) == 0 && S_ISDIR(st.st_mode)) {
-                snprintf(s_rms_dir, sizeof(s_rms_dir), "/home/Sajnaps/gb300/rms");
-            } else if (mkdir("/home/Sajnaps/gb300/rms", 0755) == 0 || errno == EEXIST) {
-                snprintf(s_rms_dir, sizeof(s_rms_dir), "/home/Sajnaps/gb300/rms");
-            } else {
-                snprintf(s_rms_dir, sizeof(s_rms_dir), "/tmp/gb300_rms");
-            }
+            snprintf(g_rms_dir, sizeof(g_rms_dir), FROGGY_SD_ROOT "/saves/j2me/default");
         }
-        ensure_dir_exists(s_rms_dir);
+        ensure_dir_exists(g_rms_dir);
     }
-    return s_rms_dir;
+    return g_rms_dir;
+}
+
+void gb300_rms_shutdown(void) {
+    for (int i = 0; i < MAX_RMS_HANDLES; i++) {
+        if (g_rms_fds[i] >= 0) {
+            fsync(g_rms_fds[i]);
+            close(g_rms_fds[i]);
+            g_rms_fds[i] = -1;
+        }
+    }
 }
 
 static int get_string_utf8(jobject string_handle, char* buf, size_t buf_size) {
@@ -137,6 +164,13 @@ static int get_rms_fd(int handle) {
     return g_rms_fds[handle - 1];
 }
 
+static int is_rms_file(const char* name, const char* prefix, size_t prefix_len) {
+    size_t len = strlen(name);
+    return len > prefix_len + 4 &&
+           strncmp(name, prefix, prefix_len) == 0 &&
+           strcasecmp(name + len - 4, ".rms") == 0;
+}
+
 static int count_record_stores(jint suiteId) {
     DIR* d = opendir(get_rms_dir());
     if (!d) return 0;
@@ -148,16 +182,18 @@ static int count_record_stores(jint suiteId) {
     int count = 0;
     struct dirent* ent;
     while ((ent = readdir(d)) != NULL) {
-        if (strncmp(ent->d_name, prefix, prefix_len) == 0) {
-            size_t name_len = strlen(ent->d_name);
-            if (name_len > 6 && strcmp(ent->d_name + name_len - 6, "_0.rms") == 0) {
-                char full_path[512];
-                snprintf(full_path, sizeof(full_path), "%s/%s", get_rms_dir(), ent->d_name);
-                struct stat st;
-                if (stat(full_path, &st) == 0 && S_ISREG(st.st_mode) && st.st_size > 0) {
-                    count++;
-                }
-            }
+        rms_trace("[RMS] scan entry='%s' prefix='%s' match=%d\\n",
+                  ent->d_name, prefix, is_rms_file(ent->d_name, prefix, prefix_len));
+        if (is_rms_file(ent->d_name, prefix, prefix_len)) {
+            char full_path[512];
+            snprintf(full_path, sizeof(full_path), "%s/%s", get_rms_dir(), ent->d_name);
+            struct stat st;
+            int stat_result = stat(full_path, &st);
+            rms_trace("[RMS] scan stat='%s' result=%d mode=%o size=%ld errno=%d\\n",
+                      full_path, stat_result, stat_result == 0 ? (unsigned)(st.st_mode & S_IFMT) : 0,
+                      stat_result == 0 ? (long)st.st_size : -1L, stat_result == 0 ? 0 : errno);
+            if (stat_result == 0 && S_ISREG(st.st_mode) && st.st_size > 0)
+                count++;
         }
     }
     closedir(d);
@@ -175,27 +211,32 @@ static void fill_record_stores_list(jint suiteId, jobjectArray names, jobject te
     struct dirent* ent;
     jsize idx = 0;
     while ((ent = readdir(d)) != NULL && idx < max_count) {
-        if (strncmp(ent->d_name, prefix, prefix_len) == 0) {
-            size_t len = strlen(ent->d_name);
-            if (len > 6 && strcmp(ent->d_name + len - 6, "_0.rms") == 0) {
-                char full_path[512];
-                snprintf(full_path, sizeof(full_path), "%s/%s", get_rms_dir(), ent->d_name);
-                struct stat st;
-                if (stat(full_path, &st) != 0 || !S_ISREG(st.st_mode) || st.st_size == 0) {
-                    continue;
-                }
-                char hex_str[512];
-                size_t hex_len = len - 6 - prefix_len;
-                if (hex_len < sizeof(hex_str)) {
-                    memcpy(hex_str, ent->d_name + prefix_len, hex_len);
-                    hex_str[hex_len] = '\0';
-                    char decoded_name[256];
-                    if (decode_hex(hex_str, decoded_name, sizeof(decoded_name))) {
-                        KNI_NewStringUTF(decoded_name, tempStr);
-                        KNI_SetObjectArrayElement(names, idx, tempStr);
-                        idx++;
-                    }
-                }
+        if (!is_rms_file(ent->d_name, prefix, prefix_len))
+            continue;
+
+        size_t len = strlen(ent->d_name);
+        size_t encoded_len = len - 4 - prefix_len;
+        if (encoded_len < 3 ||
+            ent->d_name[prefix_len + encoded_len - 2] != '_' ||
+            ent->d_name[prefix_len + encoded_len - 1] != '0')
+            continue;
+
+        char full_path[512];
+        snprintf(full_path, sizeof(full_path), "%s/%s", get_rms_dir(), ent->d_name);
+        struct stat st;
+        if (stat(full_path, &st) != 0 || !S_ISREG(st.st_mode) || st.st_size == 0)
+            continue;
+
+        char hex_str[512];
+        size_t hex_len = encoded_len - 2;
+        if (hex_len < sizeof(hex_str)) {
+            memcpy(hex_str, ent->d_name + prefix_len, hex_len);
+            hex_str[hex_len] = '\0';
+            char decoded_name[256];
+            if (decode_hex(hex_str, decoded_name, sizeof(decoded_name))) {
+                KNI_NewStringUTF(decoded_name, tempStr);
+                KNI_SetObjectArrayElement(names, idx, tempStr);
+                idx++;
             }
         }
     }
@@ -256,7 +297,7 @@ KNIDECL(com_sun_midp_rms_RecordStoreFile_openRecordStoreFile) {
     }
     KNI_EndHandles();
 
-    fprintf(stderr, "[RMS] openRecordStoreFile(suite=%d, name='%s', ext=%d, path='%s') -> handle=%d (fd=%d, errno=%d: %s)\n",
+    rms_trace("[RMS] openRecordStoreFile(suite=%d, name='%s', ext=%d, path='%s') -> handle=%d (fd=%d, errno=%d: %s)\n",
             (int)suiteId, name_utf8, extension, path, handle, handle > 0 ? get_rms_fd(handle) : -1,
             open_errno, open_errno ? strerror(open_errno) : "ok");
 
@@ -284,7 +325,10 @@ KNIDECL(com_sun_midp_rms_RecordStoreFile_setPosition) {
     int pos = KNI_GetParameterAsInt(2);
     int fd = get_rms_fd(handle);
 
-    if (fd < 0 || lseek(fd, (off_t)pos, SEEK_SET) == (off_t)-1) {
+    off_t result = fd < 0 ? (off_t)-1 : lseek(fd, (off_t)pos, SEEK_SET);
+    rms_trace("[RMS] seek(handle=%d, pos=%d) -> %ld errno=%d\n",
+              handle, pos, (long)result, result < 0 ? errno : 0);
+    if (result == (off_t)-1) {
         KNI_ThrowNew("java/io/IOException", "lseek failed on record store file");
     }
     KNI_ReturnVoid();
@@ -315,6 +359,8 @@ KNIDECL(com_sun_midp_rms_RecordStoreFile_writeBytes) {
     written = write(fd, data + offset, (size_t)length);
     KNI_EndHandles();
 
+    rms_trace("[RMS] write(handle=%d, offset=%d, length=%d) -> %ld errno=%d\n",
+              handle, offset, length, (long)written, written < 0 ? errno : 0);
     if (written < 0 || written != length) {
         KNI_ThrowNew("java/io/IOException", "write failed on record store file");
     }
@@ -358,6 +404,8 @@ KNIDECL(com_sun_midp_rms_RecordStoreFile_readBytes) {
     bytesRead = read(fd, data + offset, (size_t)length);
     KNI_EndHandles();
 
+    rms_trace("[RMS] read(handle=%d, offset=%d, length=%d) -> %ld errno=%d\n",
+              handle, offset, length, (long)bytesRead, bytesRead < 0 ? errno : 0);
     if (bytesRead < 0) {
         KNI_ThrowNew("java/io/IOException", "read failed on record store file");
         KNI_ReturnInt(0);
@@ -371,10 +419,11 @@ KNIDECL(com_sun_midp_rms_RecordStoreFile_readBytes) {
 KNIEXPORT KNI_RETURNTYPE_VOID
 KNIDECL(com_sun_midp_rms_RecordStoreFile_closeFile) {
     int handle = KNI_GetParameterAsInt(1);
-    fprintf(stderr, "[RMS] closeFile(handle=%d)\n", handle);
+    rms_trace("[RMS] closeFile(handle=%d)\n", handle);
     if (handle >= 1 && handle <= MAX_RMS_HANDLES) {
         int idx = handle - 1;
         if (g_rms_fds[idx] >= 0) {
+            fsync(g_rms_fds[idx]);
             close(g_rms_fds[idx]);
             g_rms_fds[idx] = -1;
         }
@@ -417,6 +466,7 @@ KNIDECL(com_sun_midp_rms_RecordStoreFile_finalize) {
         if (f && f->handle >= 1 && f->handle <= MAX_RMS_HANDLES) {
             int idx = f->handle - 1;
             if (g_rms_fds[idx] >= 0) {
+                fsync(g_rms_fds[idx]);
                 close(g_rms_fds[idx]);
                 g_rms_fds[idx] = -1;
             }
@@ -431,7 +481,7 @@ KNIEXPORT KNI_RETURNTYPE_INT
 KNIDECL(com_sun_midp_rms_RecordStoreFile_getNumberOfStores) {
     SuiteIdType suiteId = KNI_GetParameterAsInt(1);
     int count = count_record_stores(suiteId);
-    fprintf(stderr, "[RMS] getNumberOfStores(suite=%d) -> %d\n", (int)suiteId, count);
+    rms_trace("[RMS] getNumberOfStores(suite=%d) -> %d\n", (int)suiteId, count);
     KNI_ReturnInt((jint)count);
 }
 
@@ -453,7 +503,7 @@ KNIDECL(com_sun_midp_rms_RecordStoreFile_getRecordStoreList) {
 KNIEXPORT KNI_RETURNTYPE_VOID
 KNIDECL(com_sun_midp_rms_RecordStoreFile_removeRecordStores) {
     SuiteIdType suiteId = KNI_GetParameterAsInt(1);
-    fprintf(stderr, "[RMS] removeRecordStores(suite=%d)\n", (int)suiteId);
+    rms_trace("[RMS] removeRecordStores(suite=%d)\n", (int)suiteId);
     delete_all_record_stores(suiteId);
     KNI_ReturnVoid();
 }
@@ -478,7 +528,7 @@ KNIDECL(com_sun_midp_rms_RecordStoreUtil_exists) {
     }
     KNI_EndHandles();
 
-    fprintf(stderr, "[RMS] RecordStoreUtil.exists(suite=%d, name='%s', ext=%d) -> %d\n",
+    rms_trace("[RMS] RecordStoreUtil.exists(suite=%d, name='%s', ext=%d) -> %d\n",
             (int)suiteId, name_utf8, extension, exists);
 
     KNI_ReturnBoolean(exists);
@@ -500,7 +550,7 @@ KNIDECL(com_sun_midp_rms_RecordStoreUtil_deleteFile) {
     }
     KNI_EndHandles();
 
-    fprintf(stderr, "[RMS] RecordStoreUtil.deleteFile(suite=%d, name='%s', ext=%d)\n",
+    rms_trace("[RMS] RecordStoreUtil.deleteFile(suite=%d, name='%s', ext=%d)\n",
             (int)suiteId, name_utf8, extension);
 
     KNI_ReturnVoid();

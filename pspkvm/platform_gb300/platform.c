@@ -27,6 +27,8 @@ void gb300_input_poll(uint32_t current_buttons);
 void gb300_fs_init(void);
 void gb300_fs_set_rom(const char *path);
 const char* gb300_fs_get_jar(void);
+void gb300_rms_configure(const char *save_dir, const char *game_path);
+void gb300_rms_shutdown(void);
 
 void JavaTask(void);
 void javanotify_start_java_with_arbitrary_args(int argc, char* argv[]);
@@ -115,9 +117,20 @@ static void request_libretro_shutdown(void) {
         environ_cb(RETRO_ENVIRONMENT_SHUTDOWN, NULL);
 }
 
+/* PicoArch calls this private hook after its Exit menu item is selected.
+ * JavaTask owns retro_run() until explicitly unwound, unlike normal cores. */
+RETRO_API void froggykvm_request_exit(void) {
+    s_exit_requested = 1;
+    if (s_can_exit_jmp)
+        longjmp(s_exit_jmp, 1);
+    request_libretro_shutdown();
+}
+
 static bool game_loaded = false;
 static bool jvm_started = false;
 static char screen_option[16] = "Auto";
+
+#define RETRO_ENVIRONMENT_FROGGYKVM_RESTART 0x10001
 
 static const char *get_screen_option(void) {
     struct retro_variable var = { "froggykvm_screen_size", NULL };
@@ -272,6 +285,7 @@ RETRO_API void retro_init(void) {
 
 RETRO_API void retro_deinit(void) {
     xlog("[PSPKVM-GB300] retro_deinit: Deinitializing core...\n");
+    gb300_rms_shutdown();
     gb300_audio_deinit();
     game_loaded = false;
     jvm_started = false;
@@ -298,6 +312,8 @@ RETRO_API void retro_get_system_av_info(struct retro_system_av_info *info) {
 }
 
 RETRO_API bool retro_load_game(const struct retro_game_info *game) {
+    const char *save_dir = NULL;
+
     gb300_memory_profile("load_game_begin");
     if (!j2me_classes_available()) {
         xlog("[PSPKVM-GB300] Missing classes.zip; install it in /cubegm/bios/classes.zip\n");
@@ -307,11 +323,17 @@ RETRO_API bool retro_load_game(const struct retro_game_info *game) {
         xlog("[PSPKVM-GB300] retro_load_game: Loading ROM file '%s'\n", game->path);
         gb300_fs_set_rom(game->path);
         gb300_input_load_config(game->path);
+        if (environ_cb)
+            environ_cb(RETRO_ENVIRONMENT_GET_SAVE_DIRECTORY, &save_dir);
+        gb300_rms_configure(save_dir, game->path);
         apply_screen_option();
     } else {
         xlog("[PSPKVM-GB300] retro_load_game: Running in standalone/stub mode\n");
         gb300_fs_set_rom(FROGGY_SD_ROOT "/roms/j2me/stub.jar");
         gb300_input_load_config(FROGGY_SD_ROOT "/roms/j2me/stub.jar");
+        if (environ_cb)
+            environ_cb(RETRO_ENVIRONMENT_GET_SAVE_DIRECTORY, &save_dir);
+        gb300_rms_configure(save_dir, FROGGY_SD_ROOT "/roms/j2me/stub.jar");
         apply_screen_option();
     }
     game_loaded = true;
@@ -322,6 +344,7 @@ RETRO_API bool retro_load_game(const struct retro_game_info *game) {
 
 RETRO_API void retro_unload_game(void) {
     xlog("[PSPKVM-GB300] retro_unload_game: Game unloaded\n");
+    gb300_rms_shutdown();
     game_loaded = false;
     jvm_started = false;
 }
@@ -351,6 +374,7 @@ void gb300_poll_events(void) {
                 xlog("[PSPKVM-GB300] J2ME Display changed from %s to %s; restarting content.\n",
                      screen_option, value);
                 snprintf(screen_option, sizeof(screen_option), "%s", value);
+                environ_cb(RETRO_ENVIRONMENT_FROGGYKVM_RESTART, NULL);
                 s_exit_requested = 1;
                 if (s_can_exit_jmp) longjmp(s_exit_jmp, 1);
                 request_libretro_shutdown();
